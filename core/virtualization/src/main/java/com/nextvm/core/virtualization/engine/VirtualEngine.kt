@@ -1079,58 +1079,77 @@ class VirtualEngine @Inject constructor(
         val appsDir = File(virtualRoot, "apps")
         if (!appsDir.exists()) return
 
-        val apps = mutableListOf<VirtualApp>()
-        appsDir.listFiles()?.filter { it.extension == "json" }?.forEach { file ->
-            try {
-                val json = file.readText()
-                val app = parseAppJson(json)
-                if (app != null && File(app.apkPath).exists()) {
+        val restoredApps = mutableListOf<VirtualApp>()
+
+        // Sorted by file name so every process (host, :p0, :p1 ...) assigns
+        // the same slot to the same instance.
+        appsDir.listFiles()
+            ?.filter { it.extension == "json" }
+            ?.sortedBy { it.name }
+            ?.forEach { file ->
+                try {
+                    val savedApp = parseAppJson(file.readText()) ?: return@forEach
+
+                    if (!File(savedApp.apkPath).exists()) {
+                        Timber.tag(TAG).w("APK missing: ${savedApp.instanceId}")
+                        return@forEach
+                    }
+
+                    // Allocate a unique slot and use it (the saved slot may be stale/duplicate)
+                    val allocatedSlot = processManager.allocateSlot(savedApp.instanceId)
+                    if (allocatedSlot !in 0 until VirtualConstants.MAX_PROCESS_SLOTS) {
+                        Timber.tag(TAG).e("No process slot available: ${savedApp.instanceId}")
+                        return@forEach
+                    }
+
                     // Reload icon from APK since Drawable is not serialized
-                    var appWithIcon = reloadIconFromApk(app)
+                    var app = reloadIconFromApk(savedApp.copy(processSlot = allocatedSlot))
 
                     // Re-extract native libs if missing (fixes previously broken installs)
                     val dataRoot = File(virtualRoot, "data")
                     val reResult = NativeLibManager.reExtractIfMissing(
-                        apkPath = appWithIcon.apkPath,
-                        splitApkPaths = appWithIcon.splitApkPaths,
-                        instanceId = appWithIcon.instanceId,
+                        apkPath = app.apkPath,
+                        splitApkPaths = app.splitApkPaths,
+                        instanceId = app.instanceId,
                         dataRoot = dataRoot
                     )
                     if (reResult != null) {
-                        appWithIcon = appWithIcon.copy(
+                        app = app.copy(
                             libDir = reResult.libDir,
                             librarySearchPath = reResult.librarySearchPath,
                             primaryAbi = reResult.selectedAbi
                         )
-                        saveVirtualApp(appWithIcon)
                     }
 
-                    apps.add(appWithIcon)
-                    processManager.allocateSlot(appWithIcon.instanceId)
+                    // Persist the corrected slot / libs
+                    saveVirtualApp(app)
+
+                    restoredApps.add(app)
 
                     // Re-register in VPMS on load (lightweight, from disk)
-                    serviceManager.packageManager.registerPackageFromDisk(appWithIcon)
+                    serviceManager.packageManager.registerPackageFromDisk(app)
 
                     // Re-initialize permissions and auto-grant all on reload
                     serviceManager.permissionManager.initializePermissions(
-                        packageName = appWithIcon.packageName,
-                        requestedPermissions = appWithIcon.requestedPermissions,
-                        overrides = appWithIcon.permissionOverrides
+                        packageName = app.packageName,
+                        requestedPermissions = app.requestedPermissions,
+                        overrides = app.permissionOverrides
                     )
-                    serviceManager.permissionManager.grantAllPermissions(appWithIcon.packageName)
+                    serviceManager.permissionManager.grantAllPermissions(app.packageName)
 
                     // Re-register with Binder proxies
                     if (::binderProxyManager.isInitialized) {
-                        binderProxyManager.registerVirtualApp(appWithIcon)
+                        binderProxyManager.registerVirtualApp(app)
                     }
-                }
-            } catch (e: Exception) {
-                Timber.tag(TAG).e(e, "Failed to load app from: ${file.name}")
-            }
-        }
 
-        _installedApps.value = apps
-        Timber.tag(TAG).d("Loaded ${apps.size} installed apps")
+                    Timber.tag(TAG).i("Restored ${app.instanceId}, slot=$allocatedSlot")
+                } catch (e: Exception) {
+                    Timber.tag(TAG).e(e, "Failed to restore ${file.name}")
+                }
+            }
+
+        _installedApps.value = restoredApps
+        Timber.tag(TAG).d("Loaded ${restoredApps.size} installed apps")
     }
 
     // NOTE: GMS auto-install has been removed. NEXTVM now uses a Hybrid GMS Bridge
