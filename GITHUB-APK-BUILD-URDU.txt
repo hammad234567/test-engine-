@@ -1,0 +1,19 @@
+# NEXTVM — GitHub Actions APK build
+
+This ZIP is prepared so GitHub Actions can attempt a debug APK build.
+
+## Build from an Android phone
+
+1. Extract this ZIP, then upload the contents of the `NEXTVM-main` folder to your fork `hammad234567/NEXTVM` (not the ZIP file itself).
+2. In GitHub mobile/browser, open the repository and make sure the files are on the `main` branch. If GitHub shows an upload form, commit the changes.
+3. Open the repository's **Actions** tab.
+4. Select **Android APK Build** from the workflows list.
+5. Tap **Run workflow**, choose `main`, and tap the green **Run workflow** button.
+6. Open the new run. Wait until it finishes.
+7. If it succeeds, scroll to **Artifacts** and download **NEXTVM-debug-APK**. Extract the downloaded artifact ZIP; it contains the APK.
+
+## Important
+
+- This workflow builds the existing project as-is with Android SDK 35. It does not prove full Android 16 virtualization compatibility.
+- A successful APK build only means the project compiled; the virtualization features still need device testing.
+- If the run fails, open the failed run and share the error log. Do not install an APK unless the build completed successfully.
