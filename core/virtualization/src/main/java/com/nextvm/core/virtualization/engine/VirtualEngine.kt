@@ -524,6 +524,7 @@ class VirtualEngine @Inject constructor(
                 else -> "standard"
             }
 
+            stubRegistry.releaseAllStubsForSlot(app.processSlot)
             // 3. Resolve stub class based on launch mode
             val stubClass = stubRegistry.resolveStub(
                 slot = app.processSlot,
